@@ -528,5 +528,17 @@
   </section>
 
   <script src="js/app.js"></script>
+<script>
+/* Return link: players sent from the game-survey site (random assignment) go back there;
+   everyone else (Dice-only site) goes back to dice-survey-us. */
+(function () {
+  try {
+    var from = new URLSearchParams(location.search).get("from");
+    var map = { game: "https://sunaonahito.github.io/game-survey-us/" };
+    var el = document.querySelector(".return-link");
+    if (el && map[from]) el.href = map[from];
+  } catch (e) {}
+})();
+</script>
 </body>
 </html>
