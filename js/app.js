@@ -605,6 +605,101 @@ function saveInterimMessageAndContinue() {
   }
   surveyData.gamePlay.interimMessage = messageTextarea ? messageTextarea.value.trim() : '';
 
+  // Send all game data (one row per participant ID) to the spreadsheet
+  sendGameData();
+
   // Navigate to ending story
   navigateTo('ending-story');
+}
+
+// ============================================================
+// Game data submission (Google Sheets via Apps Script)
+// - Sent once, when the final reflection message is saved (all stages complete).
+// - Linked to the pre/post surveys by the anonymous ID (q1) that the survey site
+//   stores in localStorage ("survey_anon_code"; same origin: sunaonahito.github.io).
+// - "from" records the entry route: "game" (game-survey-us) or "direct" (dice-survey-us).
+// - mode "no-cors": success of the HTTP request itself cannot be read back.
+// ============================================================
+const GAME_GAS_URL = 'https://script.google.com/macros/s/AKfycbynMf0vLbQs8YneLFuK2o51CUAkfGtTjcbP3nhbz1zRATIjbWVnVIMgfH-Fo7xcHtzB/exec';
+const GAME_ANON_KEY = 'survey_anon_code';
+const GAME_BACKUP_KEY = 'dod_game_backup';
+let gameDataSent = false;
+
+function getAnonCode() {
+  try {
+    return (localStorage.getItem(GAME_ANON_KEY) || '').trim();
+  } catch (e) {
+    return '';
+  }
+}
+
+function getEntryRoute() {
+  try {
+    return new URLSearchParams(location.search).get('from') || 'direct';
+  } catch (e) {
+    return 'direct';
+  }
+}
+
+function buildGameAnswers(anonCode) {
+  const gp = surveyData.gamePlay || {};
+  const s1 = gp.stage1 || {};
+  const s2 = gp.stage2 || {};
+  const s3 = gp.stage3 || {};
+  return {
+    q1: anonCode,
+    game_title: 'Dice of Destiny',
+    stage1_start: s1.startTime || '',
+    stage1_end: s1.endTime || '',
+    stage1_cards: s1.cards || [],
+    stage2_start: s2.startTime || '',
+    stage2_end: s2.endTime || '',
+    stage2_stories: s2.selectedCards || [],
+    stage3_start: s3.startTime || '',
+    stage3_end: s3.endTime || '',
+    difficulty: s3.mode || '',
+    stage3_rolls: s3.rolls || [],
+    remaining_cards: s3.remainingCards || [],
+    lost_cards: s3.lostCards || [],
+    interim_message: gp.interimMessage || '',
+    from: getEntryRoute()
+  };
+}
+
+function sendGameData() {
+  if (gameDataSent) return;
+  const anonCode = getAnonCode();
+  const ts = new Date().toLocaleString('sv-SE', { timeZone: 'America/Los_Angeles' }).replace(' ', 'T');
+  const payload = { type: 'game', answers: buildGameAnswers(anonCode), timestamp: ts };
+
+  // Local backup of this participant's data (overwritten by the next game; keyed by ID)
+  try {
+    localStorage.setItem(GAME_BACKUP_KEY, JSON.stringify({ id: anonCode, sent: false, payload: payload }));
+  } catch (e) { /* ignore */ }
+
+  if (!anonCode) {
+    console.warn('Game data not sent: no participant ID (survey_anon_code) found.');
+    return;
+  }
+  gameDataSent = true;
+  try {
+    fetch(GAME_GAS_URL, {
+      method: 'POST',
+      mode: 'no-cors',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(payload),
+      redirect: 'follow',
+      keepalive: true
+    }).then(function () {
+      try {
+        localStorage.setItem(GAME_BACKUP_KEY, JSON.stringify({ id: anonCode, sent: true, payload: payload }));
+      } catch (e) { /* ignore */ }
+    }).catch(function (err) {
+      gameDataSent = false;
+      console.error('Game data send error:', err);
+    });
+  } catch (e) {
+    gameDataSent = false;
+    console.error('Game data send error:', e);
+  }
 }
